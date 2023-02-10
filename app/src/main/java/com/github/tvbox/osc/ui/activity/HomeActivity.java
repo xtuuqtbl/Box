@@ -9,6 +9,7 @@ import android.annotation.SuppressLint;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.Resources;
+import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
@@ -59,6 +60,7 @@ import com.github.tvbox.osc.util.LOG;
 import com.github.tvbox.osc.viewmodel.SourceViewModel;
 import com.orhanobut.hawk.Hawk;
 import com.owen.tvrecyclerview.widget.TvRecyclerView;
+import com.owen.tvrecyclerview.widget.V7GridLayoutManager;
 import com.owen.tvrecyclerview.widget.V7LinearLayoutManager;
 
 import org.greenrobot.eventbus.EventBus;
@@ -80,11 +82,14 @@ public class HomeActivity extends BaseActivity {
     // takagen99: Added to allow read string
     private static Resources res;
 
+    private View currentView;
     private LinearLayout topLayout;
     private LinearLayout contentLayout;
     private TextView tvName;
     private ImageView tvWifi;
     private ImageView tvFind;
+    private ImageView tvStyle;
+    private ImageView tvDraw;
     private ImageView tvMenu;
     private TextView tvDate;
     private TvRecyclerView mGridView;
@@ -147,10 +152,12 @@ public class HomeActivity extends BaseActivity {
         this.tvName = findViewById(R.id.tvName);
         this.tvWifi = findViewById(R.id.tvWifi);
         this.tvFind = findViewById(R.id.tvFind);
+        this.tvStyle = findViewById(R.id.tvStyle);
+        this.tvDraw = findViewById(R.id.tvDrawer);
         this.tvMenu = findViewById(R.id.tvMenu);
         this.tvDate = findViewById(R.id.tvDate);
         this.contentLayout = findViewById(R.id.contentLayout);
-        this.mGridView = findViewById(R.id.mGridView);
+        this.mGridView = findViewById(R.id.mGridViewCategory);
         this.mViewPager = findViewById(R.id.mViewPager);
         this.sortAdapter = new SortAdapter();
         this.mGridView.setLayoutManager(new V7LinearLayoutManager(this.mContext, 0, false));
@@ -170,6 +177,7 @@ public class HomeActivity extends BaseActivity {
 
             public void onItemSelected(TvRecyclerView tvRecyclerView, View view, int position) {
                 if (view != null) {
+                    HomeActivity.this.currentView = view;
                     HomeActivity.this.isDownOrUp = false;
                     HomeActivity.this.sortChange = true;
                     view.animate().scaleX(1.1f).scaleY(1.1f).setInterpolator(new BounceInterpolator()).setDuration(250).start();
@@ -177,8 +185,13 @@ public class HomeActivity extends BaseActivity {
                     textView.getPaint().setFakeBoldText(true);
                     textView.setTextColor(HomeActivity.this.getResources().getColor(R.color.color_FFFFFF));
                     textView.invalidate();
-                    if (!sortAdapter.getItem(position).filters.isEmpty())
-                        view.findViewById(R.id.tvFilter).setVisibility(View.VISIBLE);
+//                    if (!sortAdapter.getItem(position).filters.isEmpty())
+//                        view.findViewById(R.id.tvFilter).setVisibility(View.VISIBLE);
+
+                    MovieSort.SortData sortData = sortAdapter.getItem(position);
+                    if (!sortData.filters.isEmpty()) {
+                        showFilterIcon(sortData.filterSelectCount());
+                    }
                     HomeActivity.this.sortFocusView = view;
                     HomeActivity.this.sortFocused = position;
                     mHandler.removeCallbacks(mDataRunnable);
@@ -199,10 +212,10 @@ public class HomeActivity extends BaseActivity {
             }
         });
         this.mGridView.setOnInBorderKeyEventListener(new TvRecyclerView.OnInBorderKeyEventListener() {
-            public final boolean onInBorderKeyEvent(int direction, View view) {
-                if(direction == View.FOCUS_UP){
+            public boolean onInBorderKeyEvent(int direction, View view) {
+                if (direction == View.FOCUS_UP) {
                     BaseLazyFragment baseLazyFragment = fragments.get(sortFocused);
-                    if ((baseLazyFragment instanceof GridFragment) ) {// 弹出筛选
+                    if ((baseLazyFragment instanceof GridFragment)) {// 弹出筛选
                         ((GridFragment) baseLazyFragment).forceRefresh();
                     }
                 }
@@ -216,21 +229,22 @@ public class HomeActivity extends BaseActivity {
                 return !((GridFragment) baseLazyFragment).isLoad();
             }
         });
-        // Button : TVBOX >> Go into Source Select / Longclick to delete Cache --
+        // Button : TVBOX >> Delete Cache / Longclick to Refresh Source --
         tvName.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                dataInitOk = false;
-                jarInitOk = true;
-                showSiteSwitch();
+//                dataInitOk = false;
+//                jarInitOk = true;
+//                showSiteSwitch();
+                File dir = mContext.getCacheDir();
+                FileUtils.recursiveDelete(dir);
+                Toast.makeText(HomeActivity.this, getString(R.string.hm_cache_del), Toast.LENGTH_SHORT).show();
             }
         });
         tvName.setOnLongClickListener(new View.OnLongClickListener() {
             @Override
             public boolean onLongClick(View v) {
-                File dir = mContext.getCacheDir();
-                FileUtils.recursiveDelete(dir);
-                Toast.makeText(HomeActivity.this, getString(R.string.hm_cache_del), Toast.LENGTH_SHORT).show();
+                reloadHome();
                 return true;
             }
         });
@@ -246,6 +260,34 @@ public class HomeActivity extends BaseActivity {
             @Override
             public void onClick(View view) {
                 jumpActivity(SearchActivity.class);
+            }
+        });
+        // Button : Style --------------------------------------------
+        tvStyle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                try {
+                    Hawk.put(HawkConfig.HOME_REC_STYLE, !Hawk.get(HawkConfig.HOME_REC_STYLE, false));
+                    if (Hawk.get(HawkConfig.HOME_REC_STYLE, false)) {
+                        UserFragment.tvHotListForGrid.setVisibility(View.VISIBLE);
+                        UserFragment.tvHotListForLine.setVisibility(View.GONE);
+                        Toast.makeText(HomeActivity.this, getString(R.string.hm_style_grid), Toast.LENGTH_SHORT).show();
+                        tvStyle.setImageResource(R.drawable.hm_up_down);
+                    } else {
+                        UserFragment.tvHotListForGrid.setVisibility(View.GONE);
+                        UserFragment.tvHotListForLine.setVisibility(View.VISIBLE);
+                        Toast.makeText(HomeActivity.this, getString(R.string.hm_style_line), Toast.LENGTH_SHORT).show();
+                        tvStyle.setImageResource(R.drawable.hm_left_right);
+                    }
+                } catch (Exception ex) {
+                }
+            }
+        });
+        // Button : Drawer >> To go into App Drawer -------------------
+        tvDraw.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                jumpActivity(AppsActivity.class);
             }
         });
         // Button : Settings >> To go into Settings --------------------
@@ -305,9 +347,9 @@ public class HomeActivity extends BaseActivity {
     }
 
     private void initData() {
-        SourceBean home = ApiConfig.get().getHomeSourceBean();
 
         // takagen99 : Switch to show / hide source title
+        SourceBean home = ApiConfig.get().getHomeSourceBean();
         if (HomeShow) {
             if (home != null && home.getName() != null && !home.getName().isEmpty())
                 tvName.setText(home.getName());
@@ -324,6 +366,14 @@ public class HomeActivity extends BaseActivity {
                 tvWifi.setImageDrawable(res.getDrawable(R.drawable.hm_lan));
             }
         }
+
+        // takagen99: Set Style either Grid or Line
+        if (Hawk.get(HawkConfig.HOME_REC_STYLE, false)) {
+            tvStyle.setImageResource(R.drawable.hm_up_down);
+        } else {
+            tvStyle.setImageResource(R.drawable.hm_left_right);
+        }
+
         mGridView.requestFocus();
 
         if (dataInitOk && jarInitOk) {
@@ -493,27 +543,34 @@ public class HomeActivity extends BaseActivity {
 
     @Override
     public void onBackPressed() {
-        int i;
-        if (this.fragments.size() <= 0 || this.sortFocused >= this.fragments.size() || (i = this.sortFocused) < 0) {
-            exit();
-            return;
-        }
-        BaseLazyFragment baseLazyFragment = this.fragments.get(i);
-        if (baseLazyFragment instanceof GridFragment) {
-            View view = this.sortFocusView;
-            GridFragment grid = (GridFragment) baseLazyFragment;
-            if (grid.restoreView()) {
+
+        // takagen99: Add check for VOD Delete Mode
+        if (HawkConfig.hotVodDelete) {
+            HawkConfig.hotVodDelete = false;
+            UserFragment.homeHotVodAdapter.notifyDataSetChanged();
+        } else {
+            int i;
+            if (this.fragments.size() <= 0 || this.sortFocused >= this.fragments.size() || (i = this.sortFocused) < 0) {
+                exit();
                 return;
-            }// 还原上次保存的UI内容
-            if (view != null && !view.isFocused()) {
-                this.sortFocusView.requestFocus();
-            } else if (this.sortFocused != 0) {
-                this.mGridView.setSelection(0);
+            }
+            BaseLazyFragment baseLazyFragment = this.fragments.get(i);
+            if (baseLazyFragment instanceof GridFragment) {
+                View view = this.sortFocusView;
+                GridFragment grid = (GridFragment) baseLazyFragment;
+                if (grid.restoreView()) {
+                    return;
+                }// 还原上次保存的UI内容
+                if (view != null && !view.isFocused()) {
+                    this.sortFocusView.requestFocus();
+                } else if (this.sortFocused != 0) {
+                    this.mGridView.setSelection(0);
+                } else {
+                    exit();
+                }
             } else {
                 exit();
             }
-        } else {
-            exit();
         }
     }
 
@@ -534,6 +591,28 @@ public class HomeActivity extends BaseActivity {
     @Override
     protected void onResume() {
         super.onResume();
+
+        // takagen99 : Switch to show / hide source title
+        SourceBean home = ApiConfig.get().getHomeSourceBean();
+        if (Hawk.get(HawkConfig.HOME_SHOW_SOURCE, false)) {
+            if (home != null && home.getName() != null && !home.getName().isEmpty()) {
+                tvName.setText(home.getName());
+            }
+        } else {
+            tvName.setText(R.string.app_name);
+        }
+
+        // takagen99: Icon Placement
+        if (Hawk.get(HawkConfig.HOME_SEARCH_POSITION, true)) {
+            tvFind.setVisibility(View.VISIBLE);
+        } else {
+            tvFind.setVisibility(View.GONE);
+        }
+        if (Hawk.get(HawkConfig.HOME_MENU_POSITION, true)) {
+            tvMenu.setVisibility(View.VISIBLE);
+        } else {
+            tvMenu.setVisibility(View.GONE);
+        }
         mHandler.post(mRunnable);
     }
 
@@ -553,7 +632,18 @@ public class HomeActivity extends BaseActivity {
                 newIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                 HomeActivity.this.startActivity(newIntent);
             }
+        } else if (event.type == RefreshEvent.TYPE_FILTER_CHANGE) {
+            if (currentView != null) {
+                showFilterIcon((int) event.obj);
+            }
         }
+    }
+
+    private void showFilterIcon(int count) {
+        boolean activated = count > 0;
+        currentView.findViewById(R.id.tvFilter).setVisibility(View.VISIBLE);
+        ImageView imgView = currentView.findViewById(R.id.tvFilter);
+        imgView.setColorFilter(activated?this.getThemeColor(): Color.WHITE);
     }
 
     private final Runnable mDataRunnable = new Runnable() {
@@ -578,6 +668,11 @@ public class HomeActivity extends BaseActivity {
             if (event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
                 showSiteSwitch();
             }
+//            if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
+//                if () {
+//
+//                }
+//            }
         } else if (event.getAction() == KeyEvent.ACTION_UP) {
 
         }
@@ -621,8 +716,11 @@ public class HomeActivity extends BaseActivity {
                     ObjectAnimator.ofFloat(this.topLayout, "alpha", 1.0f, 0.0f));
             animatorSet.setDuration(250);
             animatorSet.start();
+            tvName.setFocusable(false);
             tvWifi.setFocusable(false);
             tvFind.setFocusable(false);
+            tvStyle.setFocusable(false);
+            tvDraw.setFocusable(false);
             tvMenu.setFocusable(false);
             return;
         }
@@ -637,10 +735,12 @@ public class HomeActivity extends BaseActivity {
                     ObjectAnimator.ofFloat(this.topLayout, "alpha", 0.0f, 1.0f));
             animatorSet.setDuration(250);
             animatorSet.start();
+            tvName.setFocusable(true);
             tvWifi.setFocusable(true);
             tvFind.setFocusable(true);
+            tvStyle.setFocusable(true);
+            tvDraw.setFocusable(true);
             tvMenu.setFocusable(true);
-            return;
         }
     }
 
@@ -656,19 +756,27 @@ public class HomeActivity extends BaseActivity {
     void showSiteSwitch() {
         List<SourceBean> sites = ApiConfig.get().getSourceBeanList();
         if (sites.size() > 0) {
-            String homeSourceKey = ApiConfig.get().getHomeSourceBean().getKey();
             SelectDialog<SourceBean> dialog = new SelectDialog<>(HomeActivity.this);
+
+            // Multi Column Selection
+            int spanCount = (int) Math.floor(sites.size() / 10);
+            if (spanCount <= 1) spanCount = 1;
+            if (spanCount >= 3) spanCount = 3;
+
+            TvRecyclerView tvRecyclerView = dialog.findViewById(R.id.list);
+            tvRecyclerView.setLayoutManager(new V7GridLayoutManager(dialog.getContext(), spanCount));
+            LinearLayout cl_root = dialog.findViewById(R.id.cl_root);
+            ViewGroup.LayoutParams clp = cl_root.getLayoutParams();
+            if (spanCount != 1) {
+                clp.width = AutoSizeUtils.mm2px(dialog.getContext(), 400 + 260 * (spanCount - 1));
+            }
+
             dialog.setTip(getString(R.string.dia_source));
             dialog.setAdapter(new SelectDialogAdapter.SelectDialogInterface<SourceBean>() {
                 @Override
                 public void click(SourceBean value, int pos) {
                     ApiConfig.get().setSourceBean(value);
-                    Intent intent = new Intent(getApplicationContext(), HomeActivity.class);
-                    intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                    Bundle bundle = new Bundle();
-                    bundle.putBoolean("useCache", true);
-                    intent.putExtras(bundle);
-                    HomeActivity.this.startActivity(intent);
+                    reloadHome();
                 }
 
                 @Override
@@ -701,6 +809,15 @@ public class HomeActivity extends BaseActivity {
             });
             dialog.show();
         }
+    }
+
+    void reloadHome() {
+        Intent intent = new Intent(getApplicationContext(), HomeActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        Bundle bundle = new Bundle();
+        bundle.putBoolean("useCache", true);
+        intent.putExtras(bundle);
+        HomeActivity.this.startActivity(intent);
     }
 
 //    public void onClick(View v) {

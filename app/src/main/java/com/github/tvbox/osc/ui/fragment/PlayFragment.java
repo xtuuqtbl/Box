@@ -3,16 +3,20 @@ package com.github.tvbox.osc.ui.fragment;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.ConsoleMessage;
+import android.webkit.CookieManager;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.SslErrorHandler;
@@ -52,6 +56,7 @@ import com.github.tvbox.osc.player.controller.VodController;
 import com.github.tvbox.osc.player.thirdparty.Kodi;
 import com.github.tvbox.osc.player.thirdparty.MXPlayer;
 import com.github.tvbox.osc.player.thirdparty.ReexPlayer;
+import com.github.tvbox.osc.ui.activity.DetailActivity;
 import com.github.tvbox.osc.ui.adapter.SelectDialogAdapter;
 import com.github.tvbox.osc.ui.dialog.SearchSubtitleDialog;
 import com.github.tvbox.osc.ui.dialog.SelectDialog;
@@ -103,13 +108,15 @@ import xyz.doikki.videoplayer.player.AbstractPlayer;
 import xyz.doikki.videoplayer.player.ProgressManager;
 
 public class PlayFragment extends BaseLazyFragment {
-    private MyVideoView mVideoView;
+    public MyVideoView mVideoView;
     private TextView mPlayLoadTip;
     private ImageView mPlayLoadErr;
     private ProgressBar mPlayLoading;
     private VodController mController;
     private SourceViewModel sourceViewModel;
     private Handler mHandler;
+
+    private String videoURL;
 
     @Override
     protected int getLayoutResID() {
@@ -188,7 +195,7 @@ public class PlayFragment extends BaseLazyFragment {
                     PlayFragment.this.playPrevious();
                 } else {
                     String preProgressKey = progressKey;
-                    PlayFragment.this.playNext();
+                    PlayFragment.this.playNext(rmProgress);
                     if (rmProgress && preProgressKey != null)
                         CacheManager.delete(MD5.string2MD5(preProgressKey), 0);
                 }
@@ -197,7 +204,7 @@ public class PlayFragment extends BaseLazyFragment {
             @Override
             public void playPre() {
                 if (mVodInfo.reverseSort) {
-                    PlayFragment.this.playNext();
+                    PlayFragment.this.playNext(false);
                 } else {
                     PlayFragment.this.playPrevious();
                 }
@@ -238,6 +245,11 @@ public class PlayFragment extends BaseLazyFragment {
             @Override
             public void selectAudioTrack() {
                 selectMyAudioTrack();
+            }
+
+            @Override
+            public void openVideo() {
+                openMyVideo();
             }
 
             @Override
@@ -477,6 +489,14 @@ public class PlayFragment extends BaseLazyFragment {
         dialog.show();
     }
 
+    void openMyVideo() {
+        Intent i = new Intent();
+        i.addCategory(Intent.CATEGORY_DEFAULT);
+        i.setAction(android.content.Intent.ACTION_VIEW);
+        i.setDataAndType(Uri.parse(videoURL), "video/*");
+        startActivity(Intent.createChooser(i, "Open Video with ..."));
+    }
+
     void setTip(String msg, boolean loading, boolean err) {
         requireActivity().runOnUiThread(new Runnable() { //影魔
             @Override
@@ -518,6 +538,7 @@ public class PlayFragment extends BaseLazyFragment {
                 if (mVideoView != null) {
                     mVideoView.release();
                     if (url != null) {
+                        videoURL = url;
                         try {
                             int playerType = mVodPlayerCfg.getInt("pl");
                             // takagen99: Check for External Player
@@ -723,13 +744,13 @@ public class PlayFragment extends BaseLazyFragment {
         mVideoView.pause();
     }
 
-    @Override
-    public void onPause() {
-        super.onPause();
-        if (mVideoView != null) {
-            mVideoView.resume();
-        }
-    }
+//    @Override
+//    public void onPause() {
+//        super.onPause();
+//        if (mVideoView != null) {
+//            mVideoView.pause();
+//        }
+//    }
 
     @Override
     public void onResume() {
@@ -737,6 +758,14 @@ public class PlayFragment extends BaseLazyFragment {
         if (mVideoView != null) {
             mVideoView.resume();
         }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode) {
+        if(!isInPictureInPictureMode && mVideoView.isPlaying()) {
+//            mVideoView.pause();
+        }
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode);
     }
 
     @Override
@@ -769,7 +798,7 @@ public class PlayFragment extends BaseLazyFragment {
     private String sourceKey;
     private SourceBean sourceBean;
 
-    public void playNext() {
+    public void playNext(boolean inProgress) {
         boolean hasNext = true;
         if (mVodInfo == null || mVodInfo.seriesMap.get(mVodInfo.playFlag) == null) {
             hasNext = false;
@@ -778,6 +807,11 @@ public class PlayFragment extends BaseLazyFragment {
         }
         if (!hasNext) {
             Toast.makeText(requireContext(), "已经是最后一集了", Toast.LENGTH_SHORT).show();
+            // takagen99: To auto go back to Detail Page after last episode
+            if (inProgress && ((DetailActivity) mActivity).fullWindows) {
+                ((DetailActivity) mActivity).toggleFullPreview();
+//                ((DetailActivity) mActivity).setScreenOff();
+            }
             return;
         }
         mVodInfo.playIndex++;
@@ -1393,6 +1427,9 @@ public class PlayFragment extends BaseLazyFragment {
                     } else {
                         playUrl(url, null);
                     }
+                    String cookie = CookieManager.getInstance().getCookie(url);
+                    if (!TextUtils.isEmpty(cookie)) headers.put("Cookie", " " + cookie);//携带cookie
+                    playUrl(url, headers);
                     stopLoadWebView(false);
                 }
             }
@@ -1405,7 +1442,7 @@ public class PlayFragment extends BaseLazyFragment {
         @Nullable
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
-            WebResourceResponse response = checkIsVideo(url, null);
+            WebResourceResponse response = checkIsVideo(url, new HashMap<>());
             if (response == null)
                 return super.shouldInterceptRequest(view, url);
             else
@@ -1574,6 +1611,10 @@ public class PlayFragment extends BaseLazyFragment {
                     } else {
                         playUrl(url, null);
                     }
+                    String cookie = CookieManager.getInstance().getCookie(url);
+                    if (!TextUtils.isEmpty(cookie))
+                        webHeaders.put("Cookie", " " + cookie);//携带cookie
+                    playUrl(url, webHeaders);
                     stopLoadWebView(false);
                 }
             }
